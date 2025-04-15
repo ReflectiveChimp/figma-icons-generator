@@ -1,0 +1,48 @@
+---
+name: "pre-release"
+
+on:
+  push:
+    branches:
+      - "main"
+
+jobs:
+  pre-release:
+    name: "Pre Release"
+    runs-on: "ubuntu-latest"
+    env:
+      ARCHIVE_PREFIX: "figma-icons-generator-plugin"
+    permissions:
+      contents: write
+    steps:
+      - name: "Set up environment"
+        run: echo "ARCHIVE_NAME=$ARCHIVE_PREFIX-$(date +"%Y%m%d-%H%M%S").zip" >> $GITHUB_ENV
+      - name: "Checkout source"
+        uses: actions/checkout@v2
+      - name: "Setup node"
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20.x"
+      - name: "Install dependencies"
+        run: npm install
+      - name: "Build"
+        run: mkdir dist && npm run build
+      - name: "Install zip"
+        uses: "montudor/action-zip@0852c26906e00f8a315c704958823928d8018b28"
+      - name: "Zip build output"
+        run: "zip -r ../${{ env.ARCHIVE_NAME }} ./"
+        working-directory: "dist"
+      - name: "Create release"
+        uses: "ncipollo/release-action@440c8c1cb0ed28b9f43e4d1d670870f059653174"
+        with:
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          artifacts: "${{ env.ARCHIVE_NAME }}"
+          commit: "main"
+          generateReleaseNotes: true
+          name: "Development Build"
+          prerelease: true
+          removeArtifacts: true
+          skipIfReleaseExists: false
+          tag: "development"
+          updateOnlyUnreleased: true

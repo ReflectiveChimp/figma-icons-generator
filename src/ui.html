@@ -1,0 +1,28 @@
+<div>
+  <label for="originalSize">Original Size (px)</label>
+  <div><input id="originalSize" type="number" value="24" min="16"/></div>
+</div>
+<div>
+  <label for="additionalSizes">Additional Sizes</label>
+  <div id="additionalSizes">
+    <div><label><input type="checkbox" value="20" class="additionalSize" checked/> 20px</label></div>
+    <div><label><input type="checkbox" value="16" class="additionalSize" checked/> 16px</label></div>
+    <div><label><input type="checkbox" value="12" class="additionalSize" checked/> 12px</label></div>
+  </div>
+</div>
+<button id="generate">Generate</button>
+<button id="cancel">Cancel</button>
+<script>
+  document.getElementById('generate').onclick = () => {
+    const originalSizeBox = document.getElementById('originalSize');
+    const originalSize = parseInt(originalSizeBox.value, 10);
+    const additionalSizeBoxes = document.querySelectorAll('.additionalSize:checked');
+    const additionalSizes = Array.from(additionalSizeBoxes)
+      .map(box => parseInt(box.value, 10));
+    parent.postMessage({ pluginMessage: { type: 'generate', payload: { originalSize, additionalSizes } } }, '*')
+  }
+
+  document.getElementById('cancel').onclick = () => {
+    parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*')
+  }
+</script>

@@ -1,0 +1,45 @@
+---
+name: "pre-release"
+
+on:
+  push:
+    branches:
+      - "main"
+
+jobs:
+  pre-release:
+    name: "Pre Release"
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - name: set env
+        run: echo "::set-env name=NOW::$(date +'%Y%m%d-%H%M%S')"
+
+      - name: "Checkout"
+        uses: actions/checkout@v2
+
+      - name: "Setup node"
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20.x"
+
+      - name: "Build"
+        run: |
+          npm run build
+          
+      - name: "Zip"
+        uses: thedoctor0/zip-release@0.7.5
+        with:
+          type: "zip"
+          filename: "release-${{ env.NOW }}.zip"
+          directory: "dist"
+
+      - name: "Release"
+        uses: "marvinpinto/action-automatic-releases@d68defdd11f9dcc7f52f35c1b7c236ee7513bcc1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest"
+          prerelease: true
+          title: "Development Build"
+          files: |
+            release/release.zip

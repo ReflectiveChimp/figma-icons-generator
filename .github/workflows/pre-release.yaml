@@ -46,4 +46,4 @@ jobs:
           prerelease: true
           title: "Development Build"
           files: |
-            "release/release-${{ env.NOW }}.zip"
+            "dist/release-${{ env.NOW }}.zip"

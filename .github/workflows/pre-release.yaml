@@ -25,9 +25,10 @@ jobs:
 
       - name: "Build"
         run: |
+          npm install
           mkdir dist
           npm run build
-          
+
       - name: "Zip"
         uses: thedoctor0/zip-release@0.7.5
         with:

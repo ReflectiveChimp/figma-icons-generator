@@ -25,6 +25,7 @@ jobs:
 
       - name: "Build"
         run: |
+          mkdir dist
           npm run build
           
       - name: "Zip"

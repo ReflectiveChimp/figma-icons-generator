@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: set env
-        run: echo "::set-env name=NOW::$(date +'%Y%m%d-%H%M%S')"
+        run: echo "NOW=$(date +"%Y%m%d-%H%M%S")" >> $GITHUB_ENV
 
       - name: "Checkout"
         uses: actions/checkout@v2

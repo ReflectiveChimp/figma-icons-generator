@@ -303,6 +303,175 @@ function isGeneratedIconSize(size: AnyIconSize): size is GeneratedIconSize {
 
 type AnyIconSize = GeneratedIconSize | MissingIconSize;
 
+function generateSizes(originalSize: number, additionalSizes: number[]) {
+  const allSizes = [ originalSize, ...additionalSizes ].sort((a, b) => b - a);
+  const page = figma.currentPage;
+
+  if (page.name !== 'Icons') {
+    figma.notify('Please selected a page named "Icons" to use this plugin.');
+    return;
+  }
+
+  const originalsFrame = findOrCreateFrame('Originals', page);
+  if (!originalsFrame) {
+    figma.notify('Please create a frame named "Originals" to use this plugin.');
+    return;
+  }
+
+  if (!originalsFrame.children.length) {
+    figma.notify('Please add icons to the Originals frame.');
+    return;
+  }
+
+  let originalIconFrames = originalsFrame.children.filter(isFrameNode);
+  if (originalIconFrames.length !== originalsFrame.children.length) {
+    figma.notify('All originals must be in frame.');
+    return;
+  }
+
+  originalIconFrames = originalIconFrames.filter(icon => icon.width === originalSize && icon.height === originalSize && icon.layoutMode === 'NONE');
+  if (originalIconFrames.length !== originalsFrame.children.length) {
+    figma.notify(`All originals must be in fixed size of ${originalSize}px by ${originalSize}px.`);
+    return;
+  }
+
+  layoutIcons(originalsFrame, originalSize, COLUMNS);
+
+  // Frame to hold all generated frames
+  const generatedFrame = findOrCreateFrame(`Generated`, page, frame => {
+    frame.layoutPositioning = 'AUTO';
+    frame.layoutMode = 'VERTICAL';
+    frame.layoutSizingHorizontal = 'HUG';
+    frame.layoutSizingVertical = 'HUG';
+    frame.itemSpacing = 50;
+    frame.counterAxisSpacing = 50;
+    frame.fills = [];
+    frame.expanded = true;
+  });
+
+  // For each original icon...
+  const icons = originalIconFrames.map((original): Icon => {
+    // Generated wanted sizes
+    let wantedSizes = allSizes.reduce((all, size) => {
+      all.push({
+        name: `fixed_${size}px/${original.name}`,
+        size,
+        type: 'fixed',
+        export: false
+      });
+      all.push({
+        name: `cropped_${size}px/${original.name}`,
+        size,
+        type: 'cropped',
+        export: size === original.width,
+      });
+      return all;
+    }, [] as AnyIconSize[]);
+
+    // Load saved sizes from plugin data
+    const savedSizes = readPluginSizes(original);
+
+    // Mark those that are already generated
+    wantedSizes = wantedSizes.map(size => {
+      const saved = savedSizes.find(s => s.size === size.size && s.type === size.type);
+      if (saved) {
+        const component = findComponentById(saved.id, generatedFrame);
+        if (component) {
+          return {
+            ...size,
+            id: saved.id,
+            component,
+            updated: false
+          } satisfies GeneratedIconSize;
+        } else {
+          console.warn(`Component with id ${saved.id} (${size.name}) not found in generated frame.`);
+        }
+      }
+
+      return size;
+    });
+
+    return {
+      original,
+      generated: wantedSizes.filter(isGeneratedIconSize),
+      missing: wantedSizes.filter(isMissingIconSize),
+    }
+  });
+
+  for (const icon of icons) {
+    if (icon.missing.length === 0) {
+      continue;
+    }
+
+    let missing: MissingIconSize | undefined;
+    console.log(`Generating ${icon.missing.length} missing sizes for ${icon.original.name}`);
+
+    // Generate missing sizes
+    while ((missing = icon.missing.pop())) {
+      // Where to put the generated size
+      const parent = findOrCreateGeneratedSizeTypeFrame(missing, generatedFrame);
+      // Generate the size
+      const size = generateIconSize(icon.original, missing, parent);
+      console.log(`- Generated ${missing.name}`);
+      // Ready for export
+      if (missing.export) {
+        size.exportSettings = [
+          {
+            format: 'SVG',
+          }
+        ];
+      } else {
+        size.exportSettings = [];
+      }
+      // Mark as already updated
+      icon.generated.push({
+        ...missing,
+        id: size.id,
+        component: size,
+        updated: true
+      } satisfies GeneratedIconSize);
+    }
+
+    // Sort the generated sizes - fixed first, then by largest to smallest
+    icon.generated.sort((a, b) => {
+      if (a.type === b.type) {
+        return b.size - a.size;
+      }
+      return (b.type === 'fixed' ? 1 : 0) - (a.type === 'fixed' ? 1 : 0);
+    });
+  }
+
+  const framesToResize = new Set<FrameNode>();
+  for (const icon of icons) {
+    // Update previously generated sizes
+    icon.generated = icon.generated.map(size => {
+      framesToResize.add(size.component.parent as FrameNode);
+
+      if (size.updated) {
+        return size;
+      }
+
+      // Update
+      console.log(`Updating ${size.name}`)
+      updateIcon(icon.original, size);
+
+      return size;
+    });
+
+    // Save the generated sizes to the original icon
+    const savedSizes = icon.generated.map(size => ({
+      id: size.component.id,
+      size: size.size,
+      type: size.type,
+    } satisfies SavedIconSize));
+    savePluginSizes(icon.original, savedSizes);
+  }
+
+  for (const frame of framesToResize) {
+    layoutIcons(frame, originalSize, COLUMNS);
+  }
+}
+
 const notifyErrors = (fn: () => void) => {
   try {
     fn();
@@ -317,185 +486,27 @@ type MakeMessage<TType extends string, TPayload = undefined> = {
   payload: TPayload;
 }
 
-type CancelMessage = MakeMessage<'cancel'>;
+type CloseMessage = MakeMessage<'close'>;
 type GenerateMessage = MakeMessage<'generate', {
   originalSize: number;
   additionalSizes: number[];
 }>;
-type Message = CancelMessage | GenerateMessage;
+type Message = CloseMessage | GenerateMessage;
 
 type MessageHandlers = {
   [TType in Message['type']]: (msg: Extract<Message, { type: TType }>) => void;
 }
 
 const messageHandlers = ({
-  cancel: (_msg) => {
+  close: (_msg) => {
     figma.closePlugin();
   },
   generate: ({ payload: { originalSize, additionalSizes } }) => {
-    const allSizes = [ originalSize, ...additionalSizes ].sort((a, b) => b - a);
-    if (figma.currentPage.name !== 'Icons') {
-      figma.notify('Please selected a page named "Icons" to use this plugin.');
-      return;
+    try {
+      generateSizes(originalSize, additionalSizes);
     }
-
-    const originalsFrame = findOrCreateFrame('Originals', figma.currentPage);
-    if (!originalsFrame) {
-      figma.notify('Please create a frame named "Originals" to use this plugin.');
-      return;
-    }
-
-    if (!originalsFrame.children.length) {
-      figma.notify('Please add icons to the Originals frame.');
-      return;
-    }
-
-    let originalIconFrames = originalsFrame.children.filter(isFrameNode);
-    if (originalIconFrames.length !== originalsFrame.children.length) {
-      figma.notify('All originals must be in frame.');
-      return;
-    }
-
-    originalIconFrames = originalIconFrames.filter(icon => icon.width === originalSize && icon.height === originalSize && icon.layoutMode === 'NONE');
-    if (originalIconFrames.length !== originalsFrame.children.length) {
-      figma.notify(`All originals must be in fixed size of ${originalSize}px by ${originalSize}px.`);
-      return;
-    }
-
-    layoutIcons(originalsFrame, originalSize, COLUMNS);
-
-    // Frame to hold all generated frames
-    const generatedFrame = findOrCreateFrame(`Generated`, figma.currentPage, frame => {
-      frame.layoutPositioning = 'AUTO';
-      frame.layoutMode = 'VERTICAL';
-      frame.layoutSizingHorizontal = 'HUG';
-      frame.layoutSizingVertical = 'HUG';
-      frame.itemSpacing = 50;
-      frame.counterAxisSpacing = 50;
-      frame.fills = [];
-      frame.expanded = true;
-    });
-
-    // For each original icon...
-    const icons = originalIconFrames.map((original): Icon => {
-      // Generated wanted sizes
-      let wantedSizes = allSizes.reduce((all, size) => {
-        all.push({
-          name: `fixed_${size}px/${original.name}`,
-          size,
-          type: 'fixed',
-          export: false
-        });
-        all.push({
-          name: `cropped_${size}px/${original.name}`,
-          size,
-          type: 'cropped',
-          export: size === original.width,
-        });
-        return all;
-      }, [] as AnyIconSize[]);
-
-      // Load saved sizes from plugin data
-      const savedSizes = readPluginSizes(original);
-
-      // Mark those that are already generated
-      wantedSizes = wantedSizes.map(size => {
-        const saved = savedSizes.find(s => s.size === size.size && s.type === size.type);
-        if (saved) {
-          const component = findComponentById(saved.id, generatedFrame);
-          if (component) {
-            return {
-              ...size,
-              id: saved.id,
-              component,
-              updated: false
-            } satisfies GeneratedIconSize;
-          } else {
-            console.warn(`Component with id ${saved.id} (${size.name}) not found in generated frame.`);
-          }
-        }
-
-        return size;
-      });
-
-      return {
-        original,
-        generated: wantedSizes.filter(isGeneratedIconSize),
-        missing: wantedSizes.filter(isMissingIconSize),
-      }
-    });
-
-    for (const icon of icons) {
-      if (icon.missing.length === 0) {
-        continue;
-      }
-
-      let missing: MissingIconSize | undefined;
-      console.log(`Generating ${icon.missing.length} missing sizes for ${icon.original.name}`);
-
-      // Generate missing sizes
-      while ((missing = icon.missing.pop())) {
-        // Where to put the generated size
-        const parent = findOrCreateGeneratedSizeTypeFrame(missing, generatedFrame);
-        // Generate the size
-        const size = generateIconSize(icon.original, missing, parent);
-        console.log(`- Generated ${missing.name}`);
-        // Ready for export
-        if (missing.export) {
-          size.exportSettings = [
-            {
-              format: 'SVG',
-            }
-          ];
-        } else {
-          size.exportSettings = [];
-        }
-        // Mark as already updated
-        icon.generated.push({
-          ...missing,
-          id: size.id,
-          component: size,
-          updated: true
-        } satisfies GeneratedIconSize);
-      }
-
-      // Sort the generated sizes - fixed first, then by largest to smallest
-      icon.generated.sort((a, b) => {
-        if (a.type === b.type) {
-          return b.size - a.size;
-        }
-        return (b.type === 'fixed' ? 1 : 0) - (a.type === 'fixed' ? 1 : 0);
-      });
-    }
-
-    const framesToResize = new Set<FrameNode>();
-    for (const icon of icons) {
-      // Update previously generated sizes
-      icon.generated = icon.generated.map(size => {
-        framesToResize.add(size.component.parent as FrameNode);
-
-        if (size.updated) {
-          return size;
-        }
-
-        // Update
-        console.log(`Updating ${size.name}`)
-        updateIcon(icon.original, size);
-
-        return size;
-      });
-
-      // Save the generated sizes to the original icon
-      const savedSizes = icon.generated.map(size => ({
-        id: size.component.id,
-        size: size.size,
-        type: size.type,
-      } satisfies SavedIconSize));
-      savePluginSizes(icon.original, savedSizes);
-    }
-
-    for (const frame of framesToResize) {
-      layoutIcons(frame, originalSize, COLUMNS);
+    finally {
+      figma.ui.postMessage({ type: 'enable' });
     }
   }
 } satisfies MessageHandlers) as Record<string, (msg: { type: string, payload: unknown }) => void>;

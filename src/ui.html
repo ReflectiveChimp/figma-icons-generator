@@ -11,18 +11,32 @@
   </div>
 </div>
 <button id="generate">Generate</button>
-<button id="cancel">Cancel</button>
+<button id="close">Close</button>
 <script>
-  document.getElementById('generate').onclick = () => {
-    const originalSizeBox = document.getElementById('originalSize');
-    const originalSize = parseInt(originalSizeBox.value, 10);
-    const additionalSizeBoxes = document.querySelectorAll('.additionalSize:checked');
-    const additionalSizes = Array.from(additionalSizeBoxes)
-      .map(box => parseInt(box.value, 10));
-    parent.postMessage({ pluginMessage: { type: 'generate', payload: { originalSize, additionalSizes } } }, '*')
-  }
+  onmessage = (function () {
+    const inputs = document.querySelectorAll('input, button');
+    const disableInputs = () => inputs.forEach(input => input.disabled = true);
+    const enableInputs = () => inputs.forEach(input => input.disabled = false);
 
-  document.getElementById('cancel').onclick = () => {
-    parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*')
-  }
+    document.getElementById('generate').onclick = () => {
+      const originalSizeBox = document.getElementById('originalSize');
+      const originalSize = parseInt(originalSizeBox.value, 10);
+      const additionalSizeBoxes = document.querySelectorAll('.additionalSize:checked');
+      const additionalSizes = Array.from(additionalSizeBoxes)
+        .map(box => parseInt(box.value, 10));
+      disableInputs();
+      parent.postMessage({ pluginMessage: { type: 'generate', payload: { originalSize, additionalSizes } } }, '*')
+    }
+
+    document.getElementById('close').onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'close' } }, '*')
+    }
+
+    return (event) => {
+      const { type } = event.data.pluginMessage;
+      if (type === 'enable') {
+        enableInputs();
+      }
+    };
+  })();
 </script>

@@ -31,19 +31,25 @@ jobs:
           mkdir dist
           npm run build
 
+      - name: "Install Zip"
+        uses: "montudor/action-zip@0852c26906e00f8a315c704958823928d8018b28"
+
       - name: "Zip"
-        uses: thedoctor0/zip-release@0.7.5
-        with:
-          type: "zip"
-          filename: "release-${{ env.NOW }}.zip"
-          directory: "dist"
+        run: "zip -r ../release-${{ env.NOW }}.zip ./"
+        working-directory: "dist"
 
       - name: "Release"
-        uses: "marvinpinto/action-automatic-releases@d68defdd11f9dcc7f52f35c1b7c236ee7513bcc1"
+        uses: "ncipollo/release-action@440c8c1cb0ed28b9f43e4d1d670870f059653174"
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest"
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          artifacts: "release-*.zip"
+          commit: "main"
+          generateReleaseNotes: true
+          #makeLatest: 'legacy'
+          name: "Development Build"
           prerelease: true
-          title: "Development Build"
-          files: |
-            "dist/release-${{ env.NOW }}.zip"
+          removeArtifacts: true
+          skipIfReleaseExists: false
+          tag: "development"
+          updateOnlyUnreleased: true
